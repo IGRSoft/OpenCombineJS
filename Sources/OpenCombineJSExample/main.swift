@@ -3,6 +3,7 @@ import OpenCombine
 import OpenCombineJS
 
 private let jsFetch = JSObject.global.fetch.function!
+@MainActor
 func fetch(_ url: String) -> JSPromise {
   JSPromise(jsFetch(url).object!)!
 }
