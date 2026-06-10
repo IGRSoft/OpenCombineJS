@@ -2,6 +2,10 @@
 import PackageDescription
 let package = Package(
   name: "OpenCombineJS",
+  platforms: [
+    .macOS(.v13),
+    .iOS(.v16),
+  ],
   products: [
     .executable(name: "OpenCombineJSExample", targets: ["OpenCombineJSExample"]),
     .library(name: "OpenCombineJS", targets: ["OpenCombineJS"]),
