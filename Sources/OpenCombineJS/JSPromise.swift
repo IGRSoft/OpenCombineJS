@@ -16,12 +16,23 @@ import JavaScriptKit
 import OpenCombine
 
 public extension JSPromise {
+
+  /// Error wrapper that carries a JSValue rejection reason.
+  ///
+  /// `@unchecked Sendable` is sound here: JavaScriptKit runs single-threaded in WASM, so the
+  /// wrapped `JSValue` never crosses isolation domains. The annotation is required because
+  /// Swift 6's `Error` refines `Sendable` while JavaScriptKit marks `JSValue` non-Sendable.
+  struct PromiseError: Error, Equatable, @unchecked Sendable {
+    public let value: JSValue
+    public init(_ value: JSValue) { self.value = value }
+  }
+
   final class PromisePublisher: Publisher {
     public typealias Output = JSValue
-    public typealias Failure = JSValue
+    public typealias Failure = PromiseError
 
     /// `Future` instance that handles subscriptions to this publisher.
-    private var future: Future<JSValue, JSValue>
+    private var future: Future<JSValue, PromiseError>
 
     fileprivate init(promise: JSPromise) {
       future = .init { resolver in
@@ -29,14 +40,14 @@ public extension JSPromise {
           resolver(.success($0))
           return JSValue.undefined
         }, failure: {
-          resolver(.failure($0))
+          resolver(.failure(PromiseError($0)))
           return JSValue.undefined
         })
       }
     }
 
     public func receive<Downstream: Subscriber>(subscriber: Downstream)
-      where Downstream.Input == JSValue, Downstream.Failure == JSValue
+      where Downstream.Input == JSValue, Downstream.Failure == PromiseError
     {
       future.receive(subscriber: WrappingSubscriber(inner: subscriber))
     }
