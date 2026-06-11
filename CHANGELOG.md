@@ -1,3 +1,48 @@
+# Unreleased (0.3.0)
+
+This release fixes four long-standing `JSScheduler` bugs and adds the package's first automated
+test suite.
+
+**Fixed bugs:**
+
+- `SchedulerTimeType.Stride.microseconds(_:)` and `.nanoseconds(_:)` returned the reciprocal of
+  the correct duration; they now convert to milliseconds correctly
+  ([#2](https://github.com/IGRSoft/OpenCombineJS/issues/2))
+- Cancelling the `Cancellable` returned by `schedule(after:interval:tolerance:options:_:)` before
+  the first fire crashed on a force-unwrapped `nil` timer and left the pending timeout running;
+  cancellation is now safe at any point (before the first fire, between fires, and when called
+  repeatedly) and stops both timers
+  ([#3](https://github.com/IGRSoft/OpenCombineJS/issues/3))
+- One-shot timers were never removed from the scheduler's internal storage because their cleanup
+  closures captured a still-`nil` timer reference, leaking every timer; timers are now tracked by
+  value tokens and removed after firing or on cancellation
+  ([#4](https://github.com/IGRSoft/OpenCombineJS/issues/4))
+- The repeating schedule's interval timer was created as a one-shot `setTimeout` and fired only
+  once; it now passes `isRepeating: true` and fires repeatedly at the requested cadence
+  ([#5](https://github.com/IGRSoft/OpenCombineJS/issues/5))
+
+**Additions:**
+
+- New `OpenCombineJSTests` test target using Swift Testing: host-runnable
+  `SchedulerTimeType`/`Stride` tests plus wasm-gated suites covering `JSScheduler` runtime
+  behavior, `JSPromise.publisher`, and the `JSValueDecoder` `TopLevelDecoder` conformance.
+  Run on wasm with `swift package --swift-sdk <wasm-sdk> js test` (Node.js required)
+  ([#7](https://github.com/IGRSoft/OpenCombineJS/issues/7))
+- `Sources/OpenCombineJSExample/main.swift` modernized: all force unwraps replaced with
+  `guard`/`if-let` and graceful error messages displayed in the DOM; added comments
+  explaining the JS event-loop execution context; README example block updated to match
+  ([#8](https://github.com/IGRSoft/OpenCombineJS/issues/8))
+- `JSValueDecoder.swift` now carries a documentation comment explaining the retroactive
+  `TopLevelDecoder` conformance, the duplicate-conformance build-break risk, and the
+  maintenance action required if JavaScriptKit or OpenCombine ever ships the conformance
+  natively; audited against JavaScriptKit 0.54.1 (2026-06-11)
+  ([#9](https://github.com/IGRSoft/OpenCombineJS/issues/9))
+- DocC `///` documentation added to all previously undocumented public symbols across
+  `JSPromise.swift`, `JSScheduler.swift`, and `JSValueDecoder.swift`; new
+  `Sources/OpenCombineJS/Documentation.docc/OpenCombineJS.md` landing page with overview,
+  quick-start snippet, and Topics section; `swift-docc-plugin` 1.4.0 added to Package.swift
+  ([#10](https://github.com/IGRSoft/OpenCombineJS/issues/10))
+
 # 0.2.0 (5 April 2022)
 
 This release updates dependencies on OpenCombine and JavaScriptKit to their 0.13.0 versions.
