@@ -65,8 +65,8 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
         let jsonPromise = JSPromise(jsonObj)
       else {
         return JSPromise(resolver: { resolve in
-          resolve(.failure(JSPromise.PromiseError(.string("Unexpected response shape"))))
-          return .undefined
+          // Resolver rejection value is a raw JSValue (boxed into PromiseError downstream).
+          resolve(.failure(.string("Unexpected response shape")))
         }).publisher
       }
       return jsonPromise.publisher
