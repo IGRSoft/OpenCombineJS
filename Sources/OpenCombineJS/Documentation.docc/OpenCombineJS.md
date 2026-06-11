@@ -1,20 +1,54 @@
 # ``OpenCombineJS``
 
-OpenCombine helpers for JavaScriptKit/WebAssembly APIs.
+Combine and async/await helpers for JavaScriptKit/WebAssembly APIs.
 
 ## Overview
 
-OpenCombineJS bridges [JavaScriptKit](https://github.com/swiftwasm/JavaScriptKit) and
-[OpenCombine](https://github.com/OpenCombine/OpenCombine) so you can use idiomatic Combine
-pipelines in browser-targeting Swift packages compiled to WebAssembly (WASM).
+OpenCombineJS bridges [JavaScriptKit](https://github.com/swiftwasm/JavaScriptKit) and the
+Combine ecosystem so you can use idiomatic Combine pipelines — and their async/await
+counterparts — in browser-targeting Swift packages compiled to WebAssembly (WASM).
 
-The library provides three components:
+The library provides these components:
 
 | Component | Description |
 |---|---|
 | ``JSScheduler`` | A Combine `Scheduler` backed by `setTimeout`/`setInterval` that enables time-based operators in the browser. |
-| `JSPromise.publisher` | A `Publisher` property on `JSPromise` that resolves or rejects in lock-step with the underlying JavaScript `Promise`. |
+| ``JSScheduler/sleep(for:)`` / ``JSScheduler/timer(interval:)`` | Async/await counterparts of the scheduling APIs: a one-shot JS-timer delay and an `AsyncStream` of repeating ticks. |
+| `JSPromise.publisher` | A `Publisher` property on `JSPromise` that resolves or rejects in lock-step with the underlying JavaScript `Promise`. Its async counterpart is JavaScriptKit's `JSPromise.value` (`import JavaScriptEventLoop`). |
 | `JSValueDecoder` (`TopLevelDecoder`) | A retroactive conformance that lets `JSValueDecoder` work with the `.decode(type:decoder:)` Combine operator. |
+
+### Combine on Apple platforms, OpenCombine on WASI
+
+The library selects its Combine backend at compile time (`#if canImport(Combine)`): on
+Apple platforms it builds against the **native Combine framework**, so `JSPromise.publisher`,
+``JSScheduler``, and the `JSValueDecoder` conformance vend native `Combine` types; on WASI
+(and any platform without Combine) it builds against
+[OpenCombine](https://github.com/OpenCombine/OpenCombine). The two modules mirror each other
+symbol-for-symbol — only the module identity differs, so the same consumer code compiles on
+both backends.
+
+### Async/await usage
+
+`await`-based APIs require the `JavaScriptEventLoop` global executor on WASI
+(`JavaScriptEventLoop.installGlobalExecutor()`), so suspended tasks are resumed by JS
+timers and promises:
+
+```swift
+import JavaScriptEventLoop
+
+JavaScriptEventLoop.installGlobalExecutor()
+
+let value = try await promise.value            // async counterpart of .publisher
+
+let scheduler = JSScheduler()
+await scheduler.sleep(for: .milliseconds(300)) // one-shot setTimeout delay
+
+for await _ in scheduler.timer(interval: .seconds(1)) {  // repeating setInterval ticks
+  refresh()
+}
+```
+
+The Combine surface is not deprecated: publishers and async APIs are supported side by side.
 
 ### JavaScript event-loop context
 
@@ -88,9 +122,19 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
 - ``JSScheduler/SchedulerTimeType/Stride``
 - ``JSScheduler/SchedulerOptions``
 
+### Async Scheduling
+
+- ``JSScheduler/sleep(for:)``
+- ``JSScheduler/timer(interval:)``
+
 ### JavaScript Promise Integration
 
 OpenCombineJS extends `JSPromise` (from JavaScriptKit) with a `publisher` property and two
 nested types: `JSPromise.PromisePublisher` (the Combine publisher) and `JSPromise.PromiseError`
 (the typed rejection wrapper). Because `JSPromise` is declared in JavaScriptKit, its extension
 members appear in the inherited-symbols section of the generated archive rather than here.
+
+The async counterpart of `.publisher` is `JSPromise.value` (`get async throws(JSException)`),
+shipped by JavaScriptKit's `JavaScriptEventLoop` module — not by this package. Both paths
+observe the same promise settlement; on rejection the raw JS reason is available as
+`PromiseError.value` (publisher path) or `JSException.thrownValue` (async path).

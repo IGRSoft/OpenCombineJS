@@ -1,3 +1,33 @@
+# Unreleased (0.4.0)
+
+**Declared change — Apple platforms only:**
+
+- The library now builds against **native Combine** on Apple platforms via
+  `#if canImport(Combine)`; WASI (and any platform without Combine) keeps OpenCombine.
+  Apple consumers receive native `Future`, `AnyCancellable`, `Scheduler`, and
+  `TopLevelDecoder` types from `JSPromise.publisher`, `JSScheduler`, and `JSValueDecoder`.
+  This changes type identity on Apple platforms (e.g. `PromisePublisher` now conforms to
+  `Combine.Publisher` instead of `OpenCombine.Publisher`) and is a declared break for any
+  Apple-platform consumer that pipelined these types into OpenCombine operators. WASI/WASM
+  consumers are unaffected. The package still depends on OpenCombine unconditionally;
+  full removal is tracked for 1.0 ([#11](https://github.com/IGRSoft/OpenCombineJS/issues/11),
+  [#15](https://github.com/IGRSoft/OpenCombineJS/issues/15))
+
+**Additions:**
+
+- Async/await bridge APIs alongside the Combine publishers (strictly additive — nothing is
+  deprecated): `JSScheduler.sleep(for:)` suspends via a one-shot `setTimeout`, and
+  `JSScheduler.timer(interval:)` returns an `AsyncStream` of repeating `setInterval` ticks
+  whose termination cancels the underlying JS timer. JavaScriptKit's existing
+  `JSPromise.value` (`JavaScriptEventLoop` module) is documented as the async counterpart
+  of `.publisher`. New wasm-gated differential tests prove the legacy Combine path and the
+  new async path yield identical outcomes for the same inputs
+  ([#13](https://github.com/IGRSoft/OpenCombineJS/issues/13))
+- `CONTRIBUTING.md` with host/wasm build-and-test instructions (including the
+  toolchain-mixing warning), the dependency version policy (minimum JavaScriptKit 0.54.1,
+  weekly upstream canaries, the `JSValueDecoder` deletion trigger), and the release/semver
+  policy ([#12](https://github.com/IGRSoft/OpenCombineJS/issues/12))
+
 # 0.3.0 (2026-06-11)
 
 This release fixes four long-standing `JSScheduler` bugs and adds the package's first automated

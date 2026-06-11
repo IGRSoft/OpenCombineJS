@@ -45,6 +45,12 @@ let package = Package(
           package: "JavaScriptKit",
           condition: .when(platforms: [.wasi])
         ),
+        // Provides `JSPromise.value` (async) consumed by the differential tests (#13).
+        .product(
+          name: "JavaScriptEventLoop",
+          package: "JavaScriptKit",
+          condition: .when(platforms: [.wasi])
+        ),
       ]
     ),
   ],

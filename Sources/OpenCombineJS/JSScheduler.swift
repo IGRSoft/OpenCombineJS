@@ -13,7 +13,13 @@
 // limitations under the License.
 
 import JavaScriptKit
+
+// Dual Combine backend — see JSPromise.swift for the canonical rationale (issue #11).
+#if canImport(Combine)
+import Combine
+#else
 import OpenCombine
+#endif
 
 /// A Combine `Scheduler` backed by JavaScript timers (`setTimeout`/`setInterval`).
 ///

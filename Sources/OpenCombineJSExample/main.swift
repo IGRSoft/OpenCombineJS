@@ -19,8 +19,14 @@
 // to register state and return — execution continues via the event loop thereafter.
 
 import JavaScriptKit
-import OpenCombine
 import OpenCombineJS
+
+// Dual Combine backend — see OpenCombineJS/JSPromise.swift for the rationale (issue #11).
+#if canImport(Combine)
+import Combine
+#else
+import OpenCombine
+#endif
 
 // MARK: - Helpers
 

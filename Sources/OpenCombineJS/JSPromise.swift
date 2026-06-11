@@ -13,7 +13,18 @@
 // limitations under the License.
 
 import JavaScriptKit
+
+// Dual Combine backend (issue #11): on Apple platforms the library is built against the
+// native Combine framework, so consumers receive native `Future`, `AnyCancellable`,
+// `Scheduler`, and `TopLevelDecoder` types; on WASI (and any platform without Combine)
+// it is built against OpenCombine. All consumed symbols are mirrored 1:1 between the two
+// modules — only the module identity differs. The host (macOS) test lane exercises the
+// Combine backend; the wasm test lane exercises the OpenCombine backend.
+#if canImport(Combine)
+import Combine
+#else
 import OpenCombine
+#endif
 
 /// Extensions that expose a Combine `Publisher` interface on `JSPromise`.
 ///
@@ -104,6 +115,22 @@ public extension JSPromise {
   ///     .flatMap { $0.json().publisher }   // chain further JS promises
   ///     .sink { ... }
   /// ```
+  ///
+  /// ## Async/await counterpart
+  ///
+  /// JavaScriptKit's `JavaScriptEventLoop` module ships `JSPromise.value`
+  /// (`get async throws(JSException)`), the async counterpart of this publisher:
+  ///
+  /// ```swift
+  /// import JavaScriptEventLoop
+  ///
+  /// let value = try await promise.value
+  /// ```
+  ///
+  /// Both paths observe the same settlement: the resolved `JSValue`, or — on rejection —
+  /// the same raw JS reason (`PromiseError.value` here, `JSException.thrownValue` there).
+  /// `.publisher` is not deprecated and remains fully supported alongside the async path;
+  /// any soft-deprecation decision is deferred to 1.0 (issue #13).
   var publisher: PromisePublisher {
     .init(promise: self)
   }
