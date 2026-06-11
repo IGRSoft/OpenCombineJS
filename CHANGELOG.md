@@ -1,4 +1,4 @@
-# Unreleased (0.5.0)
+# 0.5.0 (2026-06-11)
 
 **Additions (strictly non-breaking — the public API is additive only):**
 
