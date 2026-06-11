@@ -13,7 +13,18 @@
 // limitations under the License.
 
 import JavaScriptKit
+
+// Dual Combine backend (issue #11): on Apple platforms the library is built against the
+// native Combine framework, so consumers receive native `Future`, `AnyCancellable`,
+// `Scheduler`, and `TopLevelDecoder` types; on WASI (and any platform without Combine)
+// it is built against OpenCombine. All consumed symbols are mirrored 1:1 between the two
+// modules — only the module identity differs. The host (macOS) test lane exercises the
+// Combine backend; the wasm test lane exercises the OpenCombine backend.
+#if canImport(Combine)
+import Combine
+#else
 import OpenCombine
+#endif
 
 /// Extensions that expose a Combine `Publisher` interface on `JSPromise`.
 ///

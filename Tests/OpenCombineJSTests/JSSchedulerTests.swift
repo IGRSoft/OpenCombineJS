@@ -19,9 +19,15 @@
 
 #if os(WASI)
 import JavaScriptKit
-import OpenCombine
 @testable import OpenCombineJS
 import Testing
+
+// Dual Combine backend — see Sources/OpenCombineJS/JSPromise.swift (issue #11).
+#if canImport(Combine)
+import Combine
+#else
+import OpenCombine
+#endif
 
 // MARK: - now and minimumTolerance
 

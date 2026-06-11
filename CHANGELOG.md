@@ -1,3 +1,18 @@
+# Unreleased (0.4.0)
+
+**Declared change — Apple platforms only:**
+
+- The library now builds against **native Combine** on Apple platforms via
+  `#if canImport(Combine)`; WASI (and any platform without Combine) keeps OpenCombine.
+  Apple consumers receive native `Future`, `AnyCancellable`, `Scheduler`, and
+  `TopLevelDecoder` types from `JSPromise.publisher`, `JSScheduler`, and `JSValueDecoder`.
+  This changes type identity on Apple platforms (e.g. `PromisePublisher` now conforms to
+  `Combine.Publisher` instead of `OpenCombine.Publisher`) and is a declared break for any
+  Apple-platform consumer that pipelined these types into OpenCombine operators. WASI/WASM
+  consumers are unaffected. The package still depends on OpenCombine unconditionally;
+  full removal is tracked for 1.0 ([#11](https://github.com/IGRSoft/OpenCombineJS/issues/11),
+  [#15](https://github.com/IGRSoft/OpenCombineJS/issues/15))
+
 # 0.3.0 (2026-06-11)
 
 This release fixes four long-standing `JSScheduler` bugs and adds the package's first automated
