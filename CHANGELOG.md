@@ -1,4 +1,4 @@
-# Unreleased (0.3.0)
+# 0.3.0 (2026-06-11)
 
 This release fixes four long-standing `JSScheduler` bugs and adds the package's first automated
 test suite.
