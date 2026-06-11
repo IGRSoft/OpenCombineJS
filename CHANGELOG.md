@@ -23,6 +23,10 @@
   of `.publisher`. New wasm-gated differential tests prove the legacy Combine path and the
   new async path yield identical outcomes for the same inputs
   ([#13](https://github.com/IGRSoft/OpenCombineJS/issues/13))
+- `CONTRIBUTING.md` with host/wasm build-and-test instructions (including the
+  toolchain-mixing warning), the dependency version policy (minimum JavaScriptKit 0.54.1,
+  weekly upstream canaries, the `JSValueDecoder` deletion trigger), and the release/semver
+  policy ([#12](https://github.com/IGRSoft/OpenCombineJS/issues/12))
 
 # 0.3.0 (2026-06-11)
 
