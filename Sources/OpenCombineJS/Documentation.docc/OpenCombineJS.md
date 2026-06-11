@@ -130,11 +130,12 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
     .flatMap { responseValue -> JSPromise.PromisePublisher in
       guard let obj = responseValue.object,
             let jsonFn = obj.json.function,
-            let jsonObj = jsonFn().object,
+            // `Response.json` must be called with the response as `this` (#24).
+            let jsonObj = jsonFn(this: obj).object,
             let jsonPromise = JSPromise(jsonObj) else {
         return JSPromise(resolver: { resolve in
-          resolve(.failure(JSPromise.PromiseError(.string("bad response"))))
-          return .undefined
+          // Resolver rejection value is a raw JSValue (boxed into PromiseError downstream).
+          resolve(.failure(.string("bad response")))
         }).publisher
       }
       return jsonPromise.publisher
