@@ -1,3 +1,17 @@
+# 0.6.1 (2026-06-11)
+
+**Fixed:**
+
+- Example: `Response.json()` was invoked without its `this` binding, failing every fetch
+  tick in a real browser with "Illegal invocation"; it is now called bound via
+  `jsonFn(this:)` ([#24](https://github.com/IGRSoft/OpenCombineJS/issues/24))
+
+**Documentation:**
+
+- README gains a "Running the example" guide: PackageToJS `--use-cdn` bundling, the
+  `index.html` loader, static serving, and opening the example in a host browser or the
+  iOS Simulator's Safari ([#24](https://github.com/IGRSoft/OpenCombineJS/issues/24))
+
 # 0.6.0 (2026-06-11)
 
 **Build/packaging change — no public API is removed or deprecated:**

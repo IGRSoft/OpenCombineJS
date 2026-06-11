@@ -60,7 +60,8 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
       guard
         let obj = responseValue.object,
         let jsonFn = obj.json.function,
-        let jsonObj = jsonFn().object,
+        // `Response.json` must be called with the response as `this`.
+        let jsonObj = jsonFn(this: obj).object,
         let jsonPromise = JSPromise(jsonObj)
       else {
         return JSPromise(resolver: { resolve in
@@ -94,6 +95,44 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
     }
 }
 ```
+
+## Running the example
+
+The example is a WebAssembly program: it needs a browser. It cannot run as a native
+process on macOS or an iOS simulator — JavaScriptKit's native builds exist only for
+editor/type-checking support (the JS bridge is compiled `#if __wasm32__`), so a native
+launch aborts immediately.
+
+1. Bundle for the browser (requires the official wasm Swift SDK matching your toolchain,
+   e.g. `swift-6.3.2-RELEASE_wasm`):
+
+   ```console
+   swift package --disable-sandbox --swift-sdk swift-6.3.2-RELEASE_wasm \
+     js --use-cdn --product OpenCombineJSExample
+   ```
+
+2. Put an `index.html` next to the produced bundle
+   (`.build/plugins/PackageToJS/outputs/Package/`):
+
+   ```html
+   <script type="module">
+     import { init } from "./index.js";
+     await init();
+   </script>
+   ```
+
+3. Serve the bundle directory and open it — any browser works, including Safari inside
+   a booted iOS simulator:
+
+   ```console
+   python3 -m http.server 8741 --directory .build/plugins/PackageToJS/outputs/Package
+   open http://127.0.0.1:8741/index.html                          # host browser
+   xcrun simctl openurl booted http://127.0.0.1:8741/index.html   # iOS Simulator Safari
+   ```
+
+`--use-cdn` resolves the WASI shim dependency from a CDN; without it, browsers cannot
+resolve the bundle's bare `@bjorn3/browser_wasi_shim` import unless you `npm install`
+in the output directory and serve through a bundler.
 
 ### Code of Conduct
 
