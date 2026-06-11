@@ -14,6 +14,7 @@ The library provides these components:
 |---|---|
 | ``JSScheduler`` | A Combine `Scheduler` backed by `setTimeout`/`setInterval` that enables time-based operators in the browser. |
 | ``JSScheduler/sleep(for:)`` / ``JSScheduler/timer(interval:)`` | Async/await counterparts of the scheduling APIs: a one-shot JS-timer delay and an `AsyncStream` of repeating ticks. |
+| ``JSClockSource`` | The injectable time-and-timer seam behind ``JSScheduler``; swap in a virtual clock for deterministic tests. ``DefaultJSClockSource`` is the production implementation. |
 | `JSPromise.publisher` | A `Publisher` property on `JSPromise` that resolves or rejects in lock-step with the underlying JavaScript `Promise`. Its async counterpart is JavaScriptKit's `JSPromise.value` (`import JavaScriptEventLoop`). |
 | `JSValueDecoder` (`TopLevelDecoder`) | A retroactive conformance that lets `JSValueDecoder` work with the `.decode(type:decoder:)` Combine operator. |
 
@@ -49,6 +50,42 @@ for await _ in scheduler.timer(interval: .seconds(1)) {  // repeating setInterva
 ```
 
 The Combine surface is not deprecated: publishers and async APIs are supported side by side.
+
+### Deterministic testing with a custom clock
+
+``JSScheduler`` performs all time observation and timer creation through the ``JSClockSource``
+seam. ``JSScheduler/init()`` uses ``DefaultJSClockSource`` (`JSDate.now()` + `JSTimer`);
+``JSScheduler/init(clock:)`` accepts any conforming implementation. Because **every**
+scheduling path flows through the seam — immediate, one-shot, repeating, and the async
+``JSScheduler/sleep(for:)``/``JSScheduler/timer(interval:)`` bridges — injecting a manually
+advanced clock makes scheduler behavior fully deterministic: no real timers, no jitter
+tolerance bands, and no JavaScript runtime required, so such tests can run on any platform:
+
+```swift
+final class VirtualClock: JSClockSource {
+  private(set) var now: Double = 0
+  // makeTimer(millisecondsDelay:isRepeating:callback:) records pending timers;
+  // advance(by:) fires the due ones in order and moves `now`.
+}
+
+let clock = VirtualClock()
+let scheduler = JSScheduler(clock: clock)
+
+var fired = false
+scheduler.schedule(
+  after: scheduler.now.advanced(by: .milliseconds(50)),
+  tolerance: scheduler.minimumTolerance,
+  options: nil
+) { fired = true }
+
+clock.advance(by: 49) // fired == false — not due yet
+clock.advance(by: 1) //  fired == true  — exactly on time
+```
+
+The package's own test suite contains a complete reference implementation
+(`Tests/OpenCombineJSTests/VirtualClock.swift`) that mirrors JavaScript timer semantics:
+due-time ordering with creation-order ties, negative delays clamping to zero, and repeating
+timers firing once per elapsed period.
 
 ### JavaScript event-loop context
 
@@ -126,6 +163,13 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
 
 - ``JSScheduler/sleep(for:)``
 - ``JSScheduler/timer(interval:)``
+
+### Clock Injection
+
+- ``JSClockSource``
+- ``JSClockCancellable``
+- ``DefaultJSClockSource``
+- ``JSScheduler/init(clock:)``
 
 ### JavaScript Promise Integration
 
