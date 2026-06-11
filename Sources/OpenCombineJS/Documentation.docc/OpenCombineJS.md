@@ -28,6 +28,12 @@ Apple platforms it builds against the **native Combine framework**, so `JSPromis
 symbol-for-symbol — only the module identity differs, so the same consumer code compiles on
 both backends.
 
+Since 0.6.0 the OpenCombine package dependency is also **platform-conditional**: on Apple
+platforms OpenCombine is neither compiled nor linked — Apple consumers get a
+zero-OpenCombine build (the package is still fetched when SwiftPM resolves the dependency
+graph). On WASI, Linux, and the other non-Apple platforms OpenCombine remains a full
+build-and-link dependency, exactly as before.
+
 ### Async/await usage
 
 `await`-based APIs require the `JavaScriptEventLoop` global executor on WASI

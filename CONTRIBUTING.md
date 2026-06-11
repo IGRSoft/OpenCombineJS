@@ -37,9 +37,18 @@ Notes:
 ## Dependency version policy
 
 - Minimum **JavaScriptKit 0.54.1** (ships `JSPromise.value`, required by the async bridge, #13).
+- **OpenCombine is platform-conditional** (#15): the product dependency carries
+  `condition: .when(platforms: [.wasi, .linux, .android, .windows, .openbsd])` — every
+  non-Apple platform the 6.3 `PackageDescription` exposes. On Apple platforms the sources use
+  native Combine (`#if canImport(Combine)`, #11) and OpenCombine is neither compiled nor
+  linked; it is still fetched at resolution time because the package-level declaration stays.
+  When editing the platform list, keep it in sync with "platforms where `canImport(Combine)`
+  is false" — dropping one silently breaks that platform's build. Full removal of the
+  declaration is deferred until the Publisher surface is retired.
 - Weekly canaries ([canary-upstreams.yml](.github/workflows/canary-upstreams.yml)) build against
   the latest JavaScriptKit release and OpenCombine main. They are allowed to fail and auto-file
-  `canary-failure` issues instead of breaking CI.
+  `canary-failure` issues instead of breaking CI. Note the OpenCombine canary must build the
+  **wasm lane** — a macOS host build no longer compiles OpenCombine at all.
 - The moment JavaScriptKit ships a native `TopLevelDecoder` conformance, our retroactive one
   becomes a duplicate-conformance build error: delete `Sources/OpenCombineJS/JSValueDecoder.swift`
   and tag a minor release (#9). The JSKit canary exists to catch this early.
