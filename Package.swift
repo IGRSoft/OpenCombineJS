@@ -1,6 +1,16 @@
 // swift-tools-version:6.3
 import PackageDescription
 
+/// Platforms WITHOUT native Combine (`#if canImport(Combine)` is false there, so the
+/// sources fall back to `import OpenCombine` — see JSPromise.swift, #11/#15).
+/// Must list EVERY non-Apple platform PackageDescription 6.3 exposes, not just .wasi:
+/// dropping one (e.g. .linux) would silently unlink OpenCombine for its consumers and
+/// break their builds.  (.freebsd exists in the 6.3 swiftinterface but is gated
+/// @available(_PackageDescription 999.0) and therefore not usable yet.)
+/// On Apple platforms the condition keeps OpenCombine out of the build graph entirely:
+/// it is still FETCHED at dependency-resolution time, but never compiled or linked.
+let openCombinePlatforms: [Platform] = [.wasi, .linux, .android, .windows, .openbsd]
+
 let package = Package(
   name: "OpenCombineJS",
   platforms: [
@@ -24,12 +34,22 @@ let package = Package(
       name: "OpenCombineJSExample",
       dependencies: [
         "OpenCombineJS",
+        .product(
+          name: "OpenCombine",
+          package: "OpenCombine",
+          condition: .when(platforms: openCombinePlatforms)
+        ),
       ]
     ),
     .target(
       name: "OpenCombineJS",
       dependencies: [
-        "JavaScriptKit", "OpenCombine",
+        "JavaScriptKit",
+        .product(
+          name: "OpenCombine",
+          package: "OpenCombine",
+          condition: .when(platforms: openCombinePlatforms)
+        ),
       ]
     ),
     .testTarget(
@@ -37,7 +57,11 @@ let package = Package(
       dependencies: [
         "OpenCombineJS",
         "JavaScriptKit",
-        "OpenCombine",
+        .product(
+          name: "OpenCombine",
+          package: "OpenCombine",
+          condition: .when(platforms: openCombinePlatforms)
+        ),
         // Installs the JavaScriptEventLoop global executor at startup so async tests can be
         // resumed by JS timers/promises. Only meaningful (and only linked) on WASI.
         .product(
