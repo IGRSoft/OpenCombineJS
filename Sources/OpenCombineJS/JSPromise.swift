@@ -115,6 +115,22 @@ public extension JSPromise {
   ///     .flatMap { $0.json().publisher }   // chain further JS promises
   ///     .sink { ... }
   /// ```
+  ///
+  /// ## Async/await counterpart
+  ///
+  /// JavaScriptKit's `JavaScriptEventLoop` module ships `JSPromise.value`
+  /// (`get async throws(JSException)`), the async counterpart of this publisher:
+  ///
+  /// ```swift
+  /// import JavaScriptEventLoop
+  ///
+  /// let value = try await promise.value
+  /// ```
+  ///
+  /// Both paths observe the same settlement: the resolved `JSValue`, or — on rejection —
+  /// the same raw JS reason (`PromiseError.value` here, `JSException.thrownValue` there).
+  /// `.publisher` is not deprecated and remains fully supported alongside the async path;
+  /// any soft-deprecation decision is deferred to 1.0 (issue #13).
   var publisher: PromisePublisher {
     .init(promise: self)
   }

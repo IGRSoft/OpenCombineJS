@@ -13,6 +13,17 @@
   full removal is tracked for 1.0 ([#11](https://github.com/IGRSoft/OpenCombineJS/issues/11),
   [#15](https://github.com/IGRSoft/OpenCombineJS/issues/15))
 
+**Additions:**
+
+- Async/await bridge APIs alongside the Combine publishers (strictly additive — nothing is
+  deprecated): `JSScheduler.sleep(for:)` suspends via a one-shot `setTimeout`, and
+  `JSScheduler.timer(interval:)` returns an `AsyncStream` of repeating `setInterval` ticks
+  whose termination cancels the underlying JS timer. JavaScriptKit's existing
+  `JSPromise.value` (`JavaScriptEventLoop` module) is documented as the async counterpart
+  of `.publisher`. New wasm-gated differential tests prove the legacy Combine path and the
+  new async path yield identical outcomes for the same inputs
+  ([#13](https://github.com/IGRSoft/OpenCombineJS/issues/13))
+
 # 0.3.0 (2026-06-11)
 
 This release fixes four long-standing `JSScheduler` bugs and adds the package's first automated
