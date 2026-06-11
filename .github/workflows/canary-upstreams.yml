@@ -93,7 +93,7 @@ jobs:
         run: |
           echo "Patching Package.swift: JavaScriptKit → exact: ${JSKIT_VERSION}"
           # Replace `from: "0.54.1"` with `exact: "<latest>"` for the JSKit dependency.
-          # Using the env var (not direct ${{ }} interpolation) keeps the sed call safe.
+          # Using the env var (not direct GitHub-expression interpolation) keeps the sed call safe.
           sed -i '' \
             "s|from: \"0.54.1\"|exact: \"${JSKIT_VERSION}\"|g" \
             Package.swift
