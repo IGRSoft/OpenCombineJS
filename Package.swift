@@ -1,5 +1,6 @@
 // swift-tools-version:6.3
 import PackageDescription
+
 let package = Package(
   name: "OpenCombineJS",
   platforms: [
@@ -16,6 +17,7 @@ let package = Package(
       from: "0.54.1"
     ),
     .package(url: "https://github.com/OpenCombine/OpenCombine.git", from: "0.14.0"),
+    .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
   ],
   targets: [
     .target(
@@ -28,6 +30,21 @@ let package = Package(
       name: "OpenCombineJS",
       dependencies: [
         "JavaScriptKit", "OpenCombine",
+      ]
+    ),
+    .testTarget(
+      name: "OpenCombineJSTests",
+      dependencies: [
+        "OpenCombineJS",
+        "JavaScriptKit",
+        "OpenCombine",
+        // Installs the JavaScriptEventLoop global executor at startup so async tests can be
+        // resumed by JS timers/promises. Only meaningful (and only linked) on WASI.
+        .product(
+          name: "JavaScriptEventLoopTestSupport",
+          package: "JavaScriptKit",
+          condition: .when(platforms: [.wasi])
+        ),
       ]
     ),
   ],

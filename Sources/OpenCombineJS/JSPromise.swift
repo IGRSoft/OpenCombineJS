@@ -15,20 +15,54 @@
 import JavaScriptKit
 import OpenCombine
 
+/// Extensions that expose a Combine `Publisher` interface on `JSPromise`.
+///
+/// Import `OpenCombineJS` to access the `.publisher` property and associated types.
+/// All API in this extension is safe to call only from the JavaScript event loop thread;
+/// do not dispatch across concurrency domains.
 public extension JSPromise {
-
-  /// Error wrapper that carries a JSValue rejection reason.
+  /// A typed error wrapping a JavaScript rejection value.
   ///
-  /// `@unchecked Sendable` is sound here: JavaScriptKit runs single-threaded in WASM, so the
-  /// wrapped `JSValue` never crosses isolation domains. The annotation is required because
-  /// Swift 6's `Error` refines `Sendable` while JavaScriptKit marks `JSValue` non-Sendable.
+  /// When a `JSPromise` is rejected, the rejection reason arrives as an untyped `JSValue`.
+  /// `PromiseError` boxes that value so it can be forwarded as a typed Swift `Error` through
+  /// Combine pipelines without losing the original JS context.
+  ///
+  /// ## Sendable rationale
+  ///
+  /// The type is marked `@unchecked Sendable` because `JSValue` itself is not `Sendable` in
+  /// JavaScriptKit; however, the WASM runtime is single-threaded and all JavaScript execution
+  /// occurs on one event-loop thread, so the wrapped value never crosses isolation domains in
+  /// practice. The annotation is required because Swift 6's `Error` protocol refines `Sendable`.
   struct PromiseError: Error, Equatable, @unchecked Sendable {
+    /// The raw JavaScript value that caused the promise rejection.
     public let value: JSValue
-    public init(_ value: JSValue) { self.value = value }
+
+    /// Creates a `PromiseError` wrapping the given JavaScript rejection value.
+    ///
+    /// - Parameter value: The `JSValue` passed to the promise's rejection handler.
+    public init(_ value: JSValue) {
+      self.value = value
+    }
   }
 
+  /// A `Publisher` that emits the resolved value of a `JSPromise` exactly once, then
+  /// completes; or forwards the rejection reason as a `PromiseError` failure.
+  ///
+  /// `PromisePublisher` is backed by a `Future<JSValue, PromiseError>` so that the resolved
+  /// or rejected value is cached and replayed to late subscribers — consistent with the
+  /// settled semantics of a JavaScript `Promise`.
+  ///
+  /// ## Output and Failure types
+  ///
+  /// | Associated type | Concrete type |
+  /// |---|---|
+  /// | `Output` | `JSValue` |
+  /// | `Failure` | `PromiseError` |
   final class PromisePublisher: Publisher {
+    /// The resolved JavaScript value emitted by this publisher.
     public typealias Output = JSValue
+
+    /// The error type emitted when the underlying promise is rejected.
     public typealias Failure = PromiseError
 
     /// `Future` instance that handles subscriptions to this publisher.
@@ -46,6 +80,13 @@ public extension JSPromise {
       }
     }
 
+    /// Attaches a subscriber to this publisher.
+    ///
+    /// Delegates to the underlying `Future`, which replays the settled value to each
+    /// subscriber independently.
+    ///
+    /// - Parameter subscriber: The subscriber to attach. Must accept `JSValue` input and
+    ///   `PromiseError` failures.
     public func receive<Downstream: Subscriber>(subscriber: Downstream)
       where Downstream.Input == JSValue, Downstream.Failure == PromiseError
     {
@@ -53,7 +94,16 @@ public extension JSPromise {
     }
   }
 
-  /// Creates a new publisher for this `JSPromise` instance.
+  /// A Combine publisher that resolves or rejects in lock-step with this `JSPromise`.
+  ///
+  /// Use this property to integrate JavaScript promises into Combine pipelines:
+  ///
+  /// ```swift
+  /// fetch("https://httpbin.org/uuid")
+  ///     .publisher
+  ///     .flatMap { $0.json().publisher }   // chain further JS promises
+  ///     .sink { ... }
+  /// ```
   var publisher: PromisePublisher {
     .init(promise: self)
   }
@@ -68,7 +118,9 @@ public extension JSPromise {
 
     let inner: Inner
 
-    var combineIdentifier: CombineIdentifier { inner.combineIdentifier }
+    var combineIdentifier: CombineIdentifier {
+      inner.combineIdentifier
+    }
 
     func receive(subscription: Subscription) {
       inner.receive(subscription: subscription)

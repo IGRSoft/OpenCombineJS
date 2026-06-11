@@ -1,21 +1,32 @@
+# Check PR labels — OpenCombineJS
+# Issue: #6 (CI modernization — bump action versions)
+#
+# Requires that every PR targeting main carries at least one of the allowed labels
+# before it can be merged.  Behavior is unchanged from the original workflow;
+# only the action version is bumped.
+#
+# Action versions verified (2026-06-11):
+#   zwaldowski/match-label-action v3 — https://github.com/zwaldowski/match-label-action/releases
+#     v3 is the current release; v2 is unmaintained and uses a deprecated
+#     Node.js 12 runtime that GitHub will reject.
+
 name: Check PR labels
 
-# Controls when the action will run. Triggers the workflow on push or pull request
-# events but only for the `main` branch
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+permissions:
+  contents: read
+
 jobs:
   check-labels:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
     steps:
       - name: Match PR Label
-        uses: zwaldowski/match-label-action@v2
+        uses: zwaldowski/match-label-action@v3
         with:
           allowed_multiple: >
             API design,

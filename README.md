@@ -27,33 +27,63 @@ import JavaScriptKit
 import OpenCombine
 import OpenCombineJS
 
-private let jsFetch = JSObject.global.fetch.function!
-func fetch(_ url: String) -> JSPromise {
-  JSPromise(jsFetch(url).object!)!
-}
-
+// All code runs on the single-threaded JS event loop — no concurrency needed.
 let document = JSObject.global.document
 var p = document.createElement("p")
 _ = document.body.appendChild(p)
 
+// Holds the active subscription across timer ticks; reassignment cancels the previous one.
 var subscription: AnyCancellable?
 
+// JSTimer wraps setInterval; the closure fires every 1 000 ms on the event loop.
 let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
-  subscription = fetch("https://httpbin.org/uuid")
+  // Resolve `fetch` safely — no force unwrap.
+  guard
+    let fetchFn = JSObject.global.fetch.function,
+    let promiseObj = fetchFn("https://httpbin.org/uuid").object,
+    let fetchPromise = JSPromise(promiseObj)
+  else {
+    p.innerText = .string("fetch unavailable")
+    return
+  }
+
+  subscription = fetchPromise
     .publisher
-    .flatMap {
-      JSPromise($0.json().object!)!.publisher
+    // Chain the .json() call, again without force unwraps.
+    .flatMap { responseValue -> JSPromise.PromisePublisher in
+      guard
+        let obj = responseValue.object,
+        let jsonFn = obj.json.function,
+        let jsonObj = jsonFn().object,
+        let jsonPromise = JSPromise(jsonObj)
+      else {
+        return JSPromise(resolver: { resolve in
+          resolve(.failure(JSPromise.PromiseError(.string("Unexpected response shape"))))
+          return .undefined
+        }).publisher
+      }
+      return jsonPromise.publisher
     }
     .mapError { $0 as Error }
-    .map { Result<String, Error>.success($0.uuid.string!) }
+    .map { jsonValue -> Result<String, Error> in
+      if let uuid = jsonValue.uuid.string {
+        return .success(uuid)
+      }
+      return .failure(DecodingError.valueNotFound(
+        String.self,
+        .init(codingPath: [], debugDescription: "uuid field missing or not a string")
+      ))
+    }
     .catch { Just(.failure($0)) }
-    .sink {
+    .sink { result in
       let time = JSDate().toLocaleTimeString()
-      switch $0 {
+      switch result {
       case let .success(uuid):
         p.innerText = .string("At \(time) received uuid \(uuid)")
       case let .failure(error):
-        p.innerText = .string("At \(time) received error \(error)")
+        // Short, user-facing message in the DOM; full error in the dev console.
+        JSObject.global.console.error("fetch pipeline failed: \(error)")
+        p.innerText = .string("At \(time) the request failed — see console for details")
       }
     }
 }

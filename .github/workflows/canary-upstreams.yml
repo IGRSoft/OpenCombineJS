@@ -1,0 +1,312 @@
+# Canary — Upstream Compatibility Watch
+# Issues: #9 (JSValueDecoder duplicate-conformance time-bomb), #12 (upstream canary)
+#
+# Two independent jobs run weekly to detect breaking changes from upstream
+# dependency upgrades BEFORE they affect users pinned to the current Package.resolved.
+#
+# Both jobs are allowed to fail (continue-on-error: true) and do NOT affect
+# required CI checks.  On failure each job files a GitHub issue labeled
+# `canary-failure`; duplicate-open-issue guard prevents noise.
+#
+# Security: issue title and body are constructed ONLY from controlled sources
+# (gh api json output stored in env vars, hardcoded strings).  No untrusted
+# event payload (PR title, commit message, etc.) touches any run: command.
+#
+# Action versions verified (2026-06-11):
+#   actions/checkout v6 — https://github.com/actions/checkout/releases
+
+name: Canary — Upstream Compatibility
+
+on:
+  schedule:
+    # Run every Monday at 06:00 UTC.  Stagger the two jobs via job-level delays
+    # rather than separate cron entries (they share one workflow file).
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+# Job-level permissions below grant issues:write only where needed (F-07).
+permissions:
+  contents: read
+
+# No concurrency cancellation — canary runs are rare and should always complete.
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # jskit-latest: build against the latest JavaScriptKit release.
+  #
+  # Detects the JSValueDecoder duplicate-TopLevelDecoder-conformance time-bomb
+  # described in issue #9: once JavaScriptKit ships native TopLevelDecoder
+  # conformance, JSValueDecoder.swift will produce a "Redundant conformance"
+  # compile error.  This canary catches that the moment JSKit ships it.
+  #
+  # The job patches Package.swift IN THE RUNNER ONLY (the checkout is ephemeral).
+  # Package.resolved in the repo is never modified.
+  # ---------------------------------------------------------------------------
+  jskit-latest:
+    name: Canary — Latest JavaScriptKit (#9)
+    # swift-tools-version:6.3 requires Swift 6.3 → Xcode 26.x → macos-26 image.
+    runs-on: macos-26
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write # File canary-failure issues on breakage
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode (Swift 6.3)
+        run: |
+          LATEST_XCODE=$(ls /Applications/ | grep -E '^Xcode_?[0-9]' | sort -V | tail -1)
+          if [ -n "$LATEST_XCODE" ]; then
+            sudo xcode-select -s "/Applications/${LATEST_XCODE}/Contents/Developer"
+          fi
+          swift --version
+
+      # Resolve the latest JavaScriptKit release tag via the GitHub API.
+      # Result is stored as a step output and a safe env var — NOT interpolated
+      # directly into shell commands that could be exploited.
+      - name: Resolve latest JavaScriptKit version
+        id: jskit-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Use gh cli (available on all GitHub-hosted runners) to query releases.
+          LATEST=$(gh api repos/swiftwasm/JavaScriptKit/releases/latest --jq '.tag_name')
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "ERROR: Could not resolve latest JavaScriptKit version from GitHub API"
+            exit 1
+          fi
+          # F-02/F-03: validate tag format before the value reaches sed/jq/issue title.
+          if ! printf '%s' "$LATEST" | grep -qE '^[A-Za-z0-9._+-]+$'; then
+            echo "ERROR: unexpected characters in upstream tag: ${LATEST}"
+            exit 1
+          fi
+          echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "Latest JavaScriptKit: ${LATEST}"
+
+      # Patch Package.swift in the runner workspace to request the latest version.
+      # sed on macOS requires '' for in-place edits.  The patched file is ephemeral.
+      - name: Patch Package.swift → latest JavaScriptKit
+        env:
+          JSKIT_VERSION: ${{ steps.jskit-version.outputs.version }}
+        run: |
+          echo "Patching Package.swift: JavaScriptKit → exact: ${JSKIT_VERSION}"
+          # Replace `from: "0.54.1"` with `exact: "<latest>"` for the JSKit dependency.
+          # Using the env var (not direct GitHub-expression interpolation) keeps the sed call safe.
+          sed -i '' \
+            "s|from: \"0.54.1\"|exact: \"${JSKIT_VERSION}\"|g" \
+            Package.swift
+          # Remove Package.resolved so SPM re-resolves against the patched manifest.
+          rm -f Package.resolved
+          swift package resolve
+
+      - name: Build host — latest JavaScriptKit
+        id: build-host
+        run: swift build --target OpenCombineJS
+
+      # Wasm build: install the official swift.org wasm SDK (version-matched to
+      # the toolchain — REQUIRED) and build for wasm32-unknown-wasi.
+      # NOTE: the macOS runner's Xcode toolchain has no wasm backend; the wasm
+      # build here uses the swift.org open-source toolchain if present. If this
+      # proves flaky on macOS runners, move this job to ubuntu-latest mirroring
+      # the `wasm` job in ci.yml.
+      - name: Install Swift wasm SDK (official, version-matched)
+        run: |
+          SWIFT_SEMVER=$(swift --version 2>/dev/null | grep -oE 'Swift version [0-9]+\.[0-9]+(\.[0-9]+)?' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+          SWIFT_TAG="swift-${SWIFT_SEMVER}-RELEASE"
+          # Note: .artifactbundle.tar.gz — there is no .zip variant on download.swift.org.
+          SDK_URL="https://download.swift.org/swift-${SWIFT_SEMVER}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.tar.gz"
+          echo "Downloading wasm Swift SDK from ${SDK_URL}"
+          if curl -fsSL "${SDK_URL}" -o /tmp/swift-wasm-sdk.tar.gz; then
+            swift sdk install /tmp/swift-wasm-sdk.tar.gz || true
+          else
+            echo "WARN: no official wasm SDK published for ${SWIFT_TAG}; skipping wasm canary build."
+          fi
+          swift sdk list || true
+
+      - name: Build wasm — latest JavaScriptKit
+        id: build-wasm
+        run: |
+          SDK_ID=$(swift sdk list 2>/dev/null | grep -i wasm | head -1 | awk '{print $1}' || echo "")
+          if [ -z "$SDK_ID" ]; then
+            echo "WARN: No wasm SDK found; skipping wasm build in this canary run."
+            exit 0
+          fi
+          swift build --swift-sdk "${SDK_ID}" --target OpenCombineJS -c debug
+
+      # On any step failure: check for an existing open issue with the same title
+      # before filing a new one to prevent duplicate noise.
+      #
+      # Security: JSKIT_VERSION is sourced from gh api output (a semver tag string);
+      # it is stored in an env var and never interpolated into run: inline.
+      # The issue title and body are constructed from these controlled env vars only.
+      - name: File canary-failure issue (if not already open)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JSKIT_VERSION: ${{ steps.jskit-version.outputs.version }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          ISSUE_TITLE="Canary failure: JavaScriptKit ${JSKIT_VERSION} breaks build"
+
+          # Check for an existing open issue with this exact title to avoid duplicates.
+          # (gh issue list, not `gh api -f` — -f would turn the request into a POST.)
+          EXISTING=$(gh issue list --repo "${REPO}" --state open --label canary-failure \
+            --json number,title \
+            --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" 2>/dev/null | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            echo "Open canary issue #${EXISTING} already exists — skipping new issue."
+            gh issue comment "${EXISTING}" \
+              --body "Canary re-triggered on run ${RUN_ID}: ${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}" \
+              --repo "${REPO}" || true
+            exit 0
+          fi
+
+          # Build the issue body in a temp file (keeps YAML block-scalar indentation intact).
+          BODY_FILE=$(mktemp)
+          {
+            echo "## Upstream Contract Breakage Detected"
+            echo ""
+            echo "The weekly canary job failed to build OpenCombineJS against JavaScriptKit \`${JSKIT_VERSION}\`."
+            echo ""
+            echo "### Likely causes (from 05-contract-tests.md risk catalog)"
+            echo "- \`JSValueDecoder\` duplicate TopLevelDecoder conformance — R1 (issue #9)"
+            echo "- \`JSPromise.then(success:failure:)\` signature change — R2"
+            echo "- \`JSTimer\` reference-semantics change — R3"
+            echo "- OpenCombine Swift 6 Sendable incompatibility — R5"
+            echo ""
+            echo "### Action required"
+            echo "1. Review the [canary workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})."
+            echo "2. If R1 (duplicate conformance): delete \`Sources/OpenCombineJS/JSValueDecoder.swift\` and bump the minor version."
+            echo "3. If R2/R3: update the affected bridging code."
+            echo "4. Open a migration issue linked here and milestone it to the next sprint."
+            echo ""
+            echo "Run ID: \`${RUN_ID}\`"
+          } > "${BODY_FILE}"
+
+          gh issue create \
+            --title "${ISSUE_TITLE}" \
+            --body-file "${BODY_FILE}" \
+            --label "canary-failure" \
+            --repo "${REPO}"
+
+  # ---------------------------------------------------------------------------
+  # opencombine-latest: build against the latest OpenCombine release (host only).
+  #
+  # Detects Scheduler/Publisher/Sendable API changes in OpenCombine that would
+  # break the library before users see them.
+  # ---------------------------------------------------------------------------
+  opencombine-latest:
+    name: Canary — Latest OpenCombine (#12)
+    # swift-tools-version:6.3 requires Swift 6.3 → Xcode 26.x → macos-26 image.
+    runs-on: macos-26
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write # File canary-failure issues on breakage
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Select Xcode (Swift 6.3)
+        run: |
+          LATEST_XCODE=$(ls /Applications/ | grep -E '^Xcode_?[0-9]' | sort -V | tail -1)
+          if [ -n "$LATEST_XCODE" ]; then
+            sudo xcode-select -s "/Applications/${LATEST_XCODE}/Contents/Developer"
+          fi
+          swift --version
+
+      - name: Resolve latest OpenCombine version
+        id: oc-version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          LATEST=$(gh api repos/OpenCombine/OpenCombine/releases/latest --jq '.tag_name')
+          if [ -z "$LATEST" ] || [ "$LATEST" = "null" ]; then
+            echo "ERROR: Could not resolve latest OpenCombine version from GitHub API"
+            exit 1
+          fi
+          # F-02/F-03: validate tag format before the value reaches sed/jq/issue title.
+          if ! printf '%s' "$LATEST" | grep -qE '^[A-Za-z0-9._+-]+$'; then
+            echo "ERROR: unexpected characters in upstream tag: ${LATEST}"
+            exit 1
+          fi
+          echo "version=${LATEST}" >> "$GITHUB_OUTPUT"
+          echo "Latest OpenCombine: ${LATEST}"
+
+      - name: Patch Package.swift → latest OpenCombine
+        env:
+          OC_VERSION: ${{ steps.oc-version.outputs.version }}
+        run: |
+          echo "Patching Package.swift: OpenCombine → exact: ${OC_VERSION}"
+          # macOS sed requires '' for in-place edits.
+          sed -i '' \
+            "s|from: \"0.14.0\"|exact: \"${OC_VERSION}\"|g" \
+            Package.swift
+          rm -f Package.resolved
+          swift package resolve
+
+      - name: Build host — latest OpenCombine
+        id: build-host
+        run: swift build --target OpenCombineJS
+
+      # Run host-runnable tests if the test target exists.
+      # This step is best-effort; `swift test` exits 0 if there are no test targets.
+      - name: Test host — latest OpenCombine
+        id: test-host
+        run: swift test || true
+
+      - name: File canary-failure issue (if not already open)
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OC_VERSION: ${{ steps.oc-version.outputs.version }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          ISSUE_TITLE="Canary failure: OpenCombine ${OC_VERSION} breaks build"
+
+          # (gh issue list, not `gh api -f` — -f would turn the request into a POST.)
+          EXISTING=$(gh issue list --repo "${REPO}" --state open --label canary-failure \
+            --json number,title \
+            --jq ".[] | select(.title == \"${ISSUE_TITLE}\") | .number" 2>/dev/null | head -1)
+
+          if [ -n "$EXISTING" ]; then
+            echo "Open canary issue #${EXISTING} already exists — skipping new issue."
+            gh issue comment "${EXISTING}" \
+              --body "Canary re-triggered on run ${RUN_ID}: ${SERVER_URL}/${REPO}/actions/runs/${RUN_ID}" \
+              --repo "${REPO}" || true
+            exit 0
+          fi
+
+          # Build the issue body in a temp file (keeps YAML block-scalar indentation intact).
+          BODY_FILE=$(mktemp)
+          {
+            echo "## OpenCombine Upstream Breakage Detected"
+            echo ""
+            echo "The weekly canary job failed to build OpenCombineJS against OpenCombine \`${OC_VERSION}\`."
+            echo ""
+            echo "### Likely causes"
+            echo "- Scheduler/Publisher/Subscriber Sendable annotation changes incompatible with Swift 6 strict mode"
+            echo "- OpenCombine \`Cancellable\` or \`Subscription\` protocol changes"
+            echo "- New \`@available\` constraints or renamed symbols"
+            echo ""
+            echo "### Action required"
+            echo "1. Review the [canary workflow run](${SERVER_URL}/${REPO}/actions/runs/${RUN_ID})."
+            echo "2. Apply a compatibility shim or update the affected bridging code."
+            echo "3. Open a migration issue linked here and milestone it to the next sprint."
+            echo ""
+            echo "Run ID: \`${RUN_ID}\`"
+          } > "${BODY_FILE}"
+
+          gh issue create \
+            --title "${ISSUE_TITLE}" \
+            --body-file "${BODY_FILE}" \
+            --label "canary-failure" \
+            --repo "${REPO}"

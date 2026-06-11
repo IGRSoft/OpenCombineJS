@@ -15,6 +15,35 @@
 import JavaScriptKit
 import OpenCombine
 
+/// Retroactive conformance that bridges JavaScriptKit's `JSValueDecoder` into the
+/// OpenCombine / Combine ecosystem.
+///
+/// ## Purpose
+///
+/// This extension retroactively conforms `JSValueDecoder` to OpenCombine's
+/// `TopLevelDecoder` protocol. That single conformance unlocks the `.decode(type:decoder:)`
+/// operator on any `Publisher` whose `Output` is `JSValue`, enabling idioms such as:
+///
+/// ```swift
+/// promise.publisher
+///     .decode(type: MyModel.self, decoder: JSValueDecoder())
+/// ```
+///
+/// ## Maintenance note — duplicate conformance risk (issue #9)
+///
+/// Because `JSValueDecoder` is declared in `JavaScriptKit` and `TopLevelDecoder` is
+/// declared in `OpenCombine`, this conformance is retroactive (`@retroactive`). Swift
+/// forbids two modules from providing the same retroactive conformance simultaneously;
+/// if either `JavaScriptKit` or `OpenCombine` ever ships this conformance natively the
+/// build will fail with a "redundant conformance" error.
+///
+/// **Action required** when that happens:
+/// 1. Delete this file entirely.
+/// 2. Remove the `OpenCombineJS` import from any call sites (conformance is inherited
+///    automatically).
+/// 3. Tag a minor release so dependents can migrate.
+///
+/// **Last audited:** 2026-06-11 — `JavaScriptKit` 0.54.1 does **not** ship this conformance.
 extension JSValueDecoder: @retroactive TopLevelDecoder {
   public func decode<T: Decodable>(_ type: T.Type, from value: JSValue) throws -> T {
     try decode(type, from: value, userInfo: [:])
