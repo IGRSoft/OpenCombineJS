@@ -84,7 +84,9 @@ let timer = JSTimer(millisecondsDelay: 1000, isRepeating: true) {
       guard
         let responseObject = responseValue.object,
         let jsonFn = responseObject.json.function,
-        let jsonPromiseObject = jsonFn().object,
+        // `Response.json` must be called WITH the response as `this` — an unbound
+        // call throws "Illegal invocation" in browsers (#24).
+        let jsonPromiseObject = jsonFn(this: responseObject).object,
         let jsonPromise = JSPromise(jsonPromiseObject)
       else {
         // Return a publisher that immediately fails if the response is malformed.
