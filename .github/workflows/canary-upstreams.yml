@@ -115,10 +115,11 @@ jobs:
         run: |
           SWIFT_SEMVER=$(swift --version 2>/dev/null | grep -oE 'Swift version [0-9]+\.[0-9]+(\.[0-9]+)?' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
           SWIFT_TAG="swift-${SWIFT_SEMVER}-RELEASE"
-          SDK_URL="https://download.swift.org/swift-${SWIFT_SEMVER}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.zip"
+          # Note: .artifactbundle.tar.gz — there is no .zip variant on download.swift.org.
+          SDK_URL="https://download.swift.org/swift-${SWIFT_SEMVER}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.tar.gz"
           echo "Downloading wasm Swift SDK from ${SDK_URL}"
-          if curl -fsSL "${SDK_URL}" -o /tmp/swift-wasm-sdk.zip; then
-            swift sdk install /tmp/swift-wasm-sdk.zip || true
+          if curl -fsSL "${SDK_URL}" -o /tmp/swift-wasm-sdk.tar.gz; then
+            swift sdk install /tmp/swift-wasm-sdk.tar.gz || true
           else
             echo "WARN: no official wasm SDK published for ${SWIFT_TAG}; skipping wasm canary build."
           fi

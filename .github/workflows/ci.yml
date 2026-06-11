@@ -85,6 +85,10 @@ jobs:
 
     env:
       SWIFT_VERSION: "6.3.2"
+      # Official SHA-256 for the 6.3.2 wasm SDK bundle, from
+      # https://www.swift.org/api/v1/install/releases.json (platform "wasm-sdk").
+      # Bump together with SWIFT_VERSION.
+      WASM_SDK_CHECKSUM: "a61f0584c93283589f8b2f42db05c1f9a182b506c2957271402992655591dd7c"
 
     steps:
       - name: Checkout
@@ -121,20 +125,15 @@ jobs:
           node --version
 
       # Official swift.org wasm Swift SDK, version-matched to the toolchain.
-      # Downloaded then installed from the local file (no remote-checksum dance).
+      # Note the .artifactbundle.tar.gz extension — there is no .zip variant.
+      # F-04: `swift sdk install --checksum` validates the official SHA-256
+      # published in the swift.org releases API.
       - name: Install Swift wasm32-unknown-wasi SDK (official, version-matched)
         run: |
           SWIFT_TAG="swift-${SWIFT_VERSION}-RELEASE"
-          SDK_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.zip"
-          echo "Downloading wasm Swift SDK from ${SDK_URL}"
-          curl -fsSL "${SDK_URL}" -o /tmp/swift-wasm-sdk.zip
-          # F-04: verify signature if published (keys imported by the toolchain step).
-          if curl -fsSL "${SDK_URL}.sig" -o /tmp/swift-wasm-sdk.zip.sig; then
-            gpg --verify /tmp/swift-wasm-sdk.zip.sig /tmp/swift-wasm-sdk.zip
-          else
-            echo "WARN: no .sig published for the wasm SDK bundle; relying on HTTPS integrity."
-          fi
-          swift sdk install /tmp/swift-wasm-sdk.zip
+          SDK_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.tar.gz"
+          echo "Installing wasm Swift SDK from ${SDK_URL}"
+          swift sdk install "${SDK_URL}" --checksum "${WASM_SDK_CHECKSUM}"
           swift sdk list
 
       - name: Build (wasm32-unknown-wasi, all targets + tests)
