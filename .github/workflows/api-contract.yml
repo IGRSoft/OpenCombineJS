@@ -20,7 +20,7 @@
 # baseline ref and once at HEAD — and reports added/removed/changed public symbols.
 #
 # Action versions verified (2026-06-11):
-#   actions/checkout v4 — https://github.com/actions/checkout/releases
+#   actions/checkout v6 — https://github.com/actions/checkout/releases
 
 name: API Contract Guard
 
@@ -54,7 +54,7 @@ jobs:
 
     steps:
       - name: Checkout (full history required for baseline SHA resolution)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           # fetch-depth: 0 ensures the base SHA is present in the local clone.
           fetch-depth: 0

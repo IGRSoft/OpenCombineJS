@@ -4,11 +4,11 @@
 # Two jobs:
 #   host  — macOS, Swift 6.3, swift build + swift test (host-runnable tests self-gate
 #           wasm-only paths via #if os(WASI))
-#   wasm  — Ubuntu, Swift static SDK for wasm32-unknown-wasi, build-only for now
-#           (TODO #7: enable wasm test execution once WasmKit runner is stable on CI)
+#   wasm  — Ubuntu, official swift.org wasm SDK; builds all targets and runs the
+#           full test suite under Node via JavaScriptKit's PackageToJS plugin (#7)
 #
 # Action versions verified (2026-06-11):
-#   actions/checkout  v4  — https://github.com/actions/checkout/releases (v4 is current major)
+#   actions/checkout  v6  — https://github.com/actions/checkout/releases (v4 is Node20-deprecated 2026-06-16)
 #   actions/cache     v4  — https://github.com/actions/cache/releases (v4 is current major)
 
 name: CI
@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Use the newest Xcode on the image (macos-26 ships Xcode 26.x = Swift 6.3).
       - name: Select Xcode (Swift 6.3)
@@ -66,8 +66,7 @@ jobs:
 
       - name: Test (host)
         # OpenCombineJSTests uses #if os(WASI) guards so wasm-only tests are
-        # silently skipped on macOS — this is intentional.  Once OpenCombineJSTests
-        # exists (added by the next modernization step) this command runs it.
+        # silently skipped on macOS — this is intentional.
         run: swift test
 
   # ---------------------------------------------------------------------------
@@ -89,7 +88,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Ubuntu runners ship a system Swift that may lag.  Install the exact
       # swift.org release matching the wasm SDK below.
@@ -102,7 +101,8 @@ jobs:
             libxml2-dev libz3-dev pkg-config tzdata unzip zlib1g-dev curl
 
           SWIFT_TAG="swift-${SWIFT_VERSION}-RELEASE"
-          SWIFT_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/ubuntu2404/${SWIFT_TAG}/${SWIFT_TAG}-ubuntu2404-x86_64.tar.gz"
+          # Filename pattern uses "ubuntu24.04" (with dot, no arch suffix for x86_64).
+          SWIFT_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/ubuntu2404/${SWIFT_TAG}/${SWIFT_TAG}-ubuntu24.04.tar.gz"
           echo "Downloading Swift toolchain from ${SWIFT_URL}"
           curl -fsSL "${SWIFT_URL}" -o /tmp/swift.tar.gz
           # F-04: verify the swift.org PGP signature before unpacking.
