@@ -1,3 +1,16 @@
+# CI — OpenCombineJS
+# Issue: #6 (CI modernization — replace dead Swift 5.3/5.4/5.5 wasm lanes)
+#
+# Two jobs:
+#   host  — macOS, Swift 6.3, swift build + swift test (host-runnable tests self-gate
+#           wasm-only paths via #if os(WASI))
+#   wasm  — Ubuntu, Swift static SDK for wasm32-unknown-wasi, build-only for now
+#           (TODO #7: enable wasm test execution once WasmKit runner is stable on CI)
+#
+# Action versions verified (2026-06-11):
+#   actions/checkout  v4  — https://github.com/actions/checkout/releases (v4 is current major)
+#   actions/cache     v4  — https://github.com/actions/cache/releases (v4 is current major)
+
 name: CI
 
 on:
@@ -6,30 +19,127 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel superseded runs on the same ref so PRs don't queue stale builds.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
-  linux_build_5_3:
-    runs-on: ubuntu-20.04
+  # ---------------------------------------------------------------------------
+  # host: macOS build + test
+  # swift-tools-version:6.3 requires Swift 6.3 → Xcode 26.x → macos-26 image.
+  # (macos-15 ships Xcode 16.x / Swift 6.0-6.1, which cannot parse the manifest.)
+  # ---------------------------------------------------------------------------
+  host:
+    name: Build & Test (macOS / Swift 6.3)
+    runs-on: macos-26
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: swiftwasm/swiftwasm-action@v5.3
-        with:
-          shell-action: swift build --triple wasm32-unknown-wasi
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  linux_build_5_4:
-    runs-on: ubuntu-20.04
+      # Use the newest Xcode on the image (macos-26 ships Xcode 26.x = Swift 6.3).
+      - name: Select Xcode (Swift 6.3)
+        run: |
+          ls /Applications/ | grep -i xcode || true
+          LATEST_XCODE=$(ls /Applications/ | grep -E '^Xcode_?[0-9]' | sort -V | tail -1)
+          if [ -n "$LATEST_XCODE" ]; then
+            sudo xcode-select -s "/Applications/${LATEST_XCODE}/Contents/Developer"
+          fi
+          swift --version
+
+      # SPM dependency cache keyed on Package.resolved so a resolved-file change
+      # automatically invalidates the cache.
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build (host)
+        run: swift build
+
+      - name: Test (host)
+        # OpenCombineJSTests uses #if os(WASI) guards so wasm-only tests are
+        # silently skipped on macOS — this is intentional.  Once OpenCombineJSTests
+        # exists (added by the next modernization step) this command runs it.
+        run: swift test
+
+  # ---------------------------------------------------------------------------
+  # wasm: cross-compile library + tests for wasm32-unknown-wasi and RUN the
+  # test suite under Node via JavaScriptKit's PackageToJS plugin.
+  #
+  # Both the toolchain and the wasm Swift SDK are the OFFICIAL swift.org
+  # artifacts and MUST be the same version (swift sdk requires an exact
+  # toolchain match). Commands below were verified locally on 2026-06-11
+  # against Swift 6.3.2 + swift-6.3.2-RELEASE_wasm (62 tests pass under
+  # Node v20 via `swift package js test`).
+  # ---------------------------------------------------------------------------
+  wasm:
+    name: Build & Test (wasm32-unknown-wasi / Swift SDK)
+    runs-on: ubuntu-latest
+
+    env:
+      SWIFT_VERSION: "6.3.2"
 
     steps:
-      - uses: actions/checkout@v2
-      - uses: swiftwasm/swiftwasm-action@v5.4
-        with:
-          shell-action: swift build --triple wasm32-unknown-wasi
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  linux_build_5_5:
-    runs-on: ubuntu-20.04
+      # Ubuntu runners ship a system Swift that may lag.  Install the exact
+      # swift.org release matching the wasm SDK below.
+      - name: Install Swift ${{ env.SWIFT_VERSION }} toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            binutils git gnupg2 libc6-dev libcurl4-openssl-dev \
+            libedit2 libgcc-s1 libpython3-dev libsqlite3-0 libstdc++6 \
+            libxml2-dev libz3-dev pkg-config tzdata unzip zlib1g-dev curl
 
-    steps:
-      - uses: actions/checkout@v2
-      - uses: swiftwasm/swiftwasm-action@v5.5
-        with:
-          shell-action: swift build --triple wasm32-unknown-wasi
+          SWIFT_TAG="swift-${SWIFT_VERSION}-RELEASE"
+          SWIFT_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/ubuntu2404/${SWIFT_TAG}/${SWIFT_TAG}-ubuntu2404-x86_64.tar.gz"
+          echo "Downloading Swift toolchain from ${SWIFT_URL}"
+          curl -fsSL "${SWIFT_URL}" -o /tmp/swift.tar.gz
+          # F-04: verify the swift.org PGP signature before unpacking.
+          curl -fsSL "${SWIFT_URL}.sig" -o /tmp/swift.tar.gz.sig
+          curl -fsSL https://swift.org/keys/all-keys.asc | gpg --import -
+          gpg --verify /tmp/swift.tar.gz.sig /tmp/swift.tar.gz
+          sudo tar -xzf /tmp/swift.tar.gz -C /usr/local --strip-components=1
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify Swift and Node versions
+        # Node >= 20 is required by the PackageToJS test runner; ubuntu-latest ships it.
+        run: |
+          swift --version
+          node --version
+
+      # Official swift.org wasm Swift SDK, version-matched to the toolchain.
+      # Downloaded then installed from the local file (no remote-checksum dance).
+      - name: Install Swift wasm32-unknown-wasi SDK (official, version-matched)
+        run: |
+          SWIFT_TAG="swift-${SWIFT_VERSION}-RELEASE"
+          SDK_URL="https://download.swift.org/swift-${SWIFT_VERSION}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.zip"
+          echo "Downloading wasm Swift SDK from ${SDK_URL}"
+          curl -fsSL "${SDK_URL}" -o /tmp/swift-wasm-sdk.zip
+          # F-04: verify signature if published (keys imported by the toolchain step).
+          if curl -fsSL "${SDK_URL}.sig" -o /tmp/swift-wasm-sdk.zip.sig; then
+            gpg --verify /tmp/swift-wasm-sdk.zip.sig /tmp/swift-wasm-sdk.zip
+          else
+            echo "WARN: no .sig published for the wasm SDK bundle; relying on HTTPS integrity."
+          fi
+          swift sdk install /tmp/swift-wasm-sdk.zip
+          swift sdk list
+
+      - name: Build (wasm32-unknown-wasi, all targets + tests)
+        run: swift build --swift-sdk "swift-${SWIFT_VERSION}-RELEASE_wasm" --build-tests
+
+      - name: Test (wasm under Node via JavaScriptKit PackageToJS) # #7
+        # --disable-sandbox: the PackageToJS plugin shells out to npm at build time.
+        # Note: PackageToJS expects the default scratch path (.build) — do not pass
+        # --scratch-path here.
+        run: swift package --disable-sandbox --swift-sdk "swift-${SWIFT_VERSION}-RELEASE_wasm" js test

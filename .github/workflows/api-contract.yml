@@ -1,0 +1,95 @@
+# API Contract Guard — OpenCombineJS
+# Issue: #6 (CI modernization), #12 (API stability gate)
+#
+# Fails any PR that introduces undeclared breaking changes to the public API
+# surface by running `swift package diagnose-api-breaking-changes <baseline-ref>`.
+#
+# Baseline: the PR's target-branch head (github.event.pull_request.base.sha) —
+# the gate catches breakage introduced BY the PR, not historical breakage.
+# Rationale: main already carries an intentional, declared break relative to
+# tag 0.2.0 (PromisePublisher.Failure → PromiseError, commit fefb814 / PR #1),
+# so a fixed 0.2.0 baseline would be permanently red.
+#
+# Release policy: when cutting a release, additionally run
+#   swift package diagnose-api-breaking-changes <last-release-tag>
+# locally and declare every reported change in CHANGELOG.md with the correct
+# semver bump.
+#
+# `swift package diagnose-api-breaking-changes` ships with the Swift toolchain
+# (no extra install needed).  It compiles the package twice — once at the
+# baseline ref and once at HEAD — and reports added/removed/changed public symbols.
+#
+# Action versions verified (2026-06-11):
+#   actions/checkout v4 — https://github.com/actions/checkout/releases
+
+name: API Contract Guard
+
+on:
+  pull_request:
+    branches: [main]
+    # Run on any PR that touches source or manifest; skip doc-only PRs.
+    paths:
+      - 'Sources/**'
+      - 'Package.swift'
+      - 'Package.resolved'
+
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The API baseline: head of the PR's target branch (a trusted hex SHA from
+  # the event payload, routed through env per workflow-injection hygiene).
+  BASELINE_REF: ${{ github.event.pull_request.base.sha }}
+
+jobs:
+  api-breaking-changes:
+    name: Public API — Breaking-Change Check vs PR base
+    # swift-tools-version:6.3 requires Swift 6.3 → Xcode 26.x → macos-26 image.
+    runs-on: macos-26
+
+    steps:
+      - name: Checkout (full history required for baseline SHA resolution)
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 ensures the base SHA is present in the local clone.
+          fetch-depth: 0
+
+      - name: Select Xcode (Swift 6.3)
+        run: |
+          LATEST_XCODE=$(ls /Applications/ | grep -E '^Xcode_?[0-9]' | sort -V | tail -1)
+          if [ -n "$LATEST_XCODE" ]; then
+            sudo xcode-select -s "/Applications/${LATEST_XCODE}/Contents/Developer"
+          fi
+          swift --version
+
+      - name: Verify baseline ref exists
+        run: |
+          if ! git rev-parse "${BASELINE_REF}" >/dev/null 2>&1; then
+            echo "ERROR: Baseline ref '${BASELINE_REF}' not found in this clone."
+            echo "Ensure fetch-depth: 0 is set."
+            exit 1
+          fi
+          echo "Baseline resolved: $(git rev-parse "${BASELINE_REF}")"
+
+      - name: Check for breaking API changes against PR base
+        # `swift package diagnose-api-breaking-changes <ref>` checks out the package
+        # at <ref>, generates an API baseline, then compares it against the current
+        # working tree.  Exits non-zero if breaking changes are detected.
+        run: |
+          swift package diagnose-api-breaking-changes "${BASELINE_REF}" \
+            --products OpenCombineJS
+
+      - name: Annotate PR on breaking-change failure
+        if: failure()
+        run: |
+          echo "::error title=API Breaking Change Detected::This PR introduces public API breaking changes relative to its target branch."
+          echo "::error::Options:"
+          echo "::error::  1. Revert the breaking change."
+          echo "::error::  2. If intentional: declare it in CHANGELOG.md with the correct"
+          echo "::error::     semver bump (0.x minor / 1.x major) and state the breakage"
+          echo "::error::     explicitly in the PR description so the reviewer can waive this gate."
