@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import JavaScriptKit
-
 // Dual Combine backend — see JSPromise.swift for the canonical rationale (issue #11).
 #if canImport(Combine)
 import Combine
@@ -32,17 +30,48 @@ import OpenCombine
 ///     .sink { ... }
 /// ```
 ///
-/// ## Event-loop invariant
+/// ## Concurrency model
 ///
-/// `JSScheduler` relies on the single-threaded JavaScript event loop. All scheduling calls
-/// and all timer callbacks execute on the same thread, which makes the unsynchronized
-/// `scheduledTimers` dictionary safe without locks.
+/// `JSScheduler` is intentionally **not** `Sendable` — that is the documented contract, not
+/// an omission. Its mutable state (the pending-timer token table) is unsynchronized and is
+/// safe only because, in its intended WebAssembly deployment, every scheduling call and every
+/// timer callback runs on the single-threaded JavaScript event loop. The type also compiles
+/// on Apple platforms (against native Combine), where Combine operators may legally invoke a
+/// `Sendable` scheduler from arbitrary threads — which is exactly why this class must not be
+/// marked `@unchecked Sendable`: the single-thread invariant cannot be guaranteed there.
 ///
-/// - Important: `JSScheduler` is intentionally **not** `Sendable`. Instances must not be
-///   shared across concurrency domains or moved off the JS event-loop thread.
+/// All time observation and timer creation flow through a single injectable seam
+/// (``JSClockSource``), so the class body holds no other environment-dependent state and the
+/// single-thread invariant is straightforward to audit.
+///
+/// - Important: Instances must not be shared across concurrency domains or moved off the
+///   thread that created them (on WebAssembly: the JS event-loop thread).
+///
+/// ## Deterministic testing
+///
+/// Inject a manually advanced ``JSClockSource`` via ``init(clock:)`` to drive every scheduling
+/// path — including ``sleep(for:)`` and ``timer(interval:)`` — without real timers or a
+/// JavaScript runtime. See the "Deterministic testing" section in the module overview.
 public final class JSScheduler: Scheduler {
-  /// Creates a new `JSScheduler` backed by the current JavaScript runtime.
-  public init() {}
+  /// The time-and-timer seam. All scheduling paths read time and create timers exclusively
+  /// through this value; `JSDate`/`JSTimer` are never touched directly.
+  private let clock: any JSClockSource
+
+  /// Creates a new `JSScheduler` backed by the current JavaScript runtime
+  /// (equivalent to `JSScheduler(clock: DefaultJSClockSource())`).
+  public init() {
+    clock = DefaultJSClockSource()
+  }
+
+  /// Creates a `JSScheduler` driven by the given clock source.
+  ///
+  /// Use this initializer to inject a deterministic clock in tests; production code can keep
+  /// using ``init()``, which is backed by `JSDate.now()` and `JSTimer`.
+  ///
+  /// - Parameter clock: The source of current time and timers for all scheduling paths.
+  public init(clock: any JSClockSource) {
+    self.clock = clock
+  }
 
   private final class CancellableTimer: Cancellable {
     let cancellation: () -> ()
@@ -184,9 +213,10 @@ public final class JSScheduler: Scheduler {
   /// Opaque options type; `JSScheduler` has no configurable scheduling options.
   public struct SchedulerOptions {}
 
-  /// The current time as reported by `Date.now()`, expressed in milliseconds.
+  /// The current time as reported by the scheduler's clock source, expressed in milliseconds.
+  /// For the default clock this is `Date.now()`.
   public var now: SchedulerTimeType {
-    .init(millisecondsValue: JSDate.now())
+    .init(millisecondsValue: clock.now)
   }
 
   /// The minimum tolerance accepted by the scheduler.
@@ -206,14 +236,22 @@ public final class JSScheduler: Scheduler {
   private var nextTimerToken: UInt64 = 0
 
   /// Storage keeping scheduled timers alive. Entries are removed when a one-shot timer fires or
-  /// when a repeating schedule is cancelled; removing an entry drops the last strong reference to
-  /// the `JSTimer`, whose `deinit` clears the underlying JS timer. Internal (not `private`) so
-  /// the test suite can verify cleanup via `@testable import`.
-  var scheduledTimers = [UInt64: JSTimer]()
+  /// when a repeating schedule is cancelled; removal cancels the clock-source token, which (for
+  /// the default clock) drops the last strong reference to the `JSTimer`, whose `deinit` clears
+  /// the underlying JS timer. Internal (not `private`) so the test suite can verify cleanup via
+  /// `@testable import`.
+  var scheduledTimers = [UInt64: any JSClockCancellable]()
 
   private func nextToken() -> UInt64 {
     defer { nextTimerToken += 1 }
     return nextTimerToken
+  }
+
+  /// Removes the timer registered under `token` (if any) and cancels it. Cancelling a fired
+  /// one-shot timer is a documented no-op on `JSClockCancellable`, so this is also used as
+  /// the post-fire cleanup path.
+  private func removeTimer(_ token: UInt64) {
+    scheduledTimers.removeValue(forKey: token)?.cancel()
   }
 
   /// Schedules `action` for immediate execution on the next event-loop turn.
@@ -226,16 +264,18 @@ public final class JSScheduler: Scheduler {
   ///   - action: The closure to execute.
   public func schedule(options: SchedulerOptions?, _ action: @escaping () -> ()) {
     let token = nextToken()
-    scheduledTimers[token] = JSTimer(millisecondsDelay: 0) { [weak self] in
+    scheduledTimers[token] = clock.makeTimer(millisecondsDelay: 0, isRepeating: false) {
+      [weak self] in
       action()
-      self?.scheduledTimers[token] = nil
+      self?.removeTimer(token)
     }
   }
 
   /// Schedules `action` for execution after the specified date.
   ///
-  /// The delay is computed as `date.millisecondsValue − Date.now()` and passed to
-  /// `setTimeout`. If the date is in the past the action fires on the next event-loop turn.
+  /// The delay is computed as `date.millisecondsValue − now` (against the scheduler's clock
+  /// source) and passed to `setTimeout`. If the date is in the past the action fires on the
+  /// next event-loop turn.
   ///
   /// - Parameters:
   ///   - date: The earliest time at which `action` should execute.
@@ -249,11 +289,12 @@ public final class JSScheduler: Scheduler {
     _ action: @escaping () -> ()
   ) {
     let token = nextToken()
-    scheduledTimers[token] = JSTimer(
-      millisecondsDelay: date.millisecondsValue - JSDate.now()
+    scheduledTimers[token] = clock.makeTimer(
+      millisecondsDelay: date.millisecondsValue - clock.now,
+      isRepeating: false
     ) { [weak self] in
       action()
-      self?.scheduledTimers[token] = nil
+      self?.removeTimer(token)
     }
   }
 
@@ -284,15 +325,16 @@ public final class JSScheduler: Scheduler {
     // synchronization because both always run on the single-threaded JS event loop.
     var isCancelled = false
 
-    scheduledTimers[timeoutToken] = JSTimer(
-      millisecondsDelay: date.millisecondsValue - JSDate.now()
+    scheduledTimers[timeoutToken] = clock.makeTimer(
+      millisecondsDelay: date.millisecondsValue - clock.now,
+      isRepeating: false
     ) { [weak self] in
       guard let self = self else { return }
-      self.scheduledTimers[timeoutToken] = nil
+      self.removeTimer(timeoutToken)
       // Guards against a cancellation processed after this callback was already queued
       // (issue #3): the interval must never start once cancel() has run.
       guard !isCancelled else { return }
-      self.scheduledTimers[intervalToken] = JSTimer(
+      self.scheduledTimers[intervalToken] = self.clock.makeTimer(
         millisecondsDelay: interval.magnitude,
         isRepeating: true
       ) { action() }
@@ -303,8 +345,8 @@ public final class JSScheduler: Scheduler {
     // repeated cancellation is a no-op (removing absent keys has no effect).
     return CancellableTimer {
       isCancelled = true
-      self.scheduledTimers[timeoutToken] = nil
-      self.scheduledTimers[intervalToken] = nil
+      self.removeTimer(timeoutToken)
+      self.removeTimer(intervalToken)
     }
   }
 }
