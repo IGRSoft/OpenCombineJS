@@ -1,3 +1,28 @@
+# Unreleased (0.5.0)
+
+**Additions (strictly non-breaking — the public API is additive only):**
+
+- New virtual-clock seam for deterministic scheduling: the `JSClockSource` protocol
+  (current time + a timer factory mirroring `JSTimer`'s shape, returning a
+  `JSClockCancellable` token) and the production `DefaultJSClockSource` backed by
+  `JSDate.now()`/`JSTimer`. `JSScheduler` routes every scheduling path — immediate,
+  one-shot, repeating, and the async `sleep(for:)`/`timer(interval:)` bridges — through
+  the seam. The new `JSScheduler.init(clock:)` injects a custom clock; the existing
+  `init()` is unchanged and keeps the default behavior
+  ([#14](https://github.com/IGRSoft/OpenCombineJS/issues/14))
+- Deterministic scheduler tests via a manually advanced `VirtualClock` test double; the
+  exact-value timing suites need no JavaScript runtime and now run on the host lane as
+  well as on wasm ([#14](https://github.com/IGRSoft/OpenCombineJS/issues/14))
+
+**Documentation:**
+
+- `JSScheduler`'s concurrency model is now an explicit documented contract: the class is
+  intentionally **not** `Sendable` (its unsynchronized state is only safe on the
+  single-threaded JS event loop, and Apple-side Combine could legally call a `Sendable`
+  scheduler from arbitrary threads, so `@unchecked Sendable` was evaluated and rejected).
+  The module overview gains a "Deterministic testing" guide for the clock seam
+  ([#14](https://github.com/IGRSoft/OpenCombineJS/issues/14))
+
 # 0.4.0 (2026-06-11)
 
 **Declared change — Apple platforms only:**

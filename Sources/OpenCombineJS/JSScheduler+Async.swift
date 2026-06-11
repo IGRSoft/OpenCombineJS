@@ -29,6 +29,8 @@ public extension JSScheduler {
   /// The delay is implemented with `setTimeout` — **not** `Task.sleep` — so it follows exactly
   /// the same JS macrotask semantics as the Combine scheduling APIs and shares the scheduler's
   /// internal timer bookkeeping (the timer entry is removed when it fires; nothing leaks).
+  /// Like every scheduling path, the delay is driven by the scheduler's ``JSClockSource``, so
+  /// an injected deterministic clock controls this suspension too.
   ///
   /// The method never resumes early: the continuation is resumed by the JS timer callback, which
   /// the JS runtime fires no earlier than the requested delay. Zero or negative intervals resume
@@ -55,7 +57,8 @@ public extension JSScheduler {
 
   /// Returns an `AsyncStream` that yields once per `interval`, backed by the same repeating
   /// JS timer (`setInterval`) semantics as
-  /// ``JSScheduler/schedule(after:interval:tolerance:options:_:)``.
+  /// ``JSScheduler/schedule(after:interval:tolerance:options:_:)`` — and, like that path,
+  /// driven by the scheduler's ``JSClockSource``.
   ///
   /// The first tick arrives one full `interval` after the call — the same first-fire semantics
   /// as the Combine repeating schedule. The stream never finishes on its own; iteration ends
