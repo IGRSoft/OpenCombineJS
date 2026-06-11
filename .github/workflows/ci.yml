@@ -107,7 +107,9 @@ jobs:
           curl -fsSL "${SWIFT_URL}" -o /tmp/swift.tar.gz
           # F-04: verify the swift.org PGP signature before unpacking.
           curl -fsSL "${SWIFT_URL}.sig" -o /tmp/swift.tar.gz.sig
-          curl -fsSL https://swift.org/keys/all-keys.asc | gpg --import -
+          # --compressed: swift.org serves the keyring gzip-encoded; without it
+          # curl saves raw gzip bytes and gpg rejects them ("no valid OpenPGP data").
+          curl -fsSL --compressed https://swift.org/keys/all-keys.asc | gpg --import -
           gpg --verify /tmp/swift.tar.gz.sig /tmp/swift.tar.gz
           sudo tar -xzf /tmp/swift.tar.gz -C /usr/local --strip-components=1
           echo "/usr/local/bin" >> "$GITHUB_PATH"
