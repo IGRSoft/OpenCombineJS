@@ -195,10 +195,16 @@ jobs:
             --repo "${REPO}"
 
   # ---------------------------------------------------------------------------
-  # opencombine-latest: build against the latest OpenCombine release (host only).
+  # opencombine-latest: build against the latest OpenCombine release.
   #
   # Detects Scheduler/Publisher/Sendable API changes in OpenCombine that would
   # break the library before users see them.
+  #
+  # Since #15 the OpenCombine dependency is platform-conditional: a macOS host
+  # build links native Combine and compiles ZERO OpenCombine code, so the host
+  # steps below only validate dependency resolution against the latest tag.
+  # The wasm build steps (mirroring the jskit-latest job) are what actually
+  # compile the library against the patched OpenCombine.
   # ---------------------------------------------------------------------------
   opencombine-latest:
     name: Canary — Latest OpenCombine (#12)
@@ -251,7 +257,9 @@ jobs:
           rm -f Package.resolved
           swift package resolve
 
-      - name: Build host — latest OpenCombine
+      # Host build/test compile against native Combine since #15 (resolution
+      # smoke check only — no OpenCombine source is built on macOS).
+      - name: Build host — latest OpenCombine (resolution check)
         id: build-host
         run: swift build --target OpenCombineJS
 
@@ -260,6 +268,32 @@ jobs:
       - name: Test host — latest OpenCombine
         id: test-host
         run: swift test || true
+
+      # Wasm build: the lane that actually compiles OpenCombine (see job header).
+      # Same SDK install/skip strategy as the jskit-latest job above.
+      - name: Install Swift wasm SDK (official, version-matched)
+        run: |
+          SWIFT_SEMVER=$(swift --version 2>/dev/null | grep -oE 'Swift version [0-9]+\.[0-9]+(\.[0-9]+)?' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -1)
+          SWIFT_TAG="swift-${SWIFT_SEMVER}-RELEASE"
+          # Note: .artifactbundle.tar.gz — there is no .zip variant on download.swift.org.
+          SDK_URL="https://download.swift.org/swift-${SWIFT_SEMVER}-release/wasm-sdk/${SWIFT_TAG}/${SWIFT_TAG}_wasm.artifactbundle.tar.gz"
+          echo "Downloading wasm Swift SDK from ${SDK_URL}"
+          if curl -fsSL "${SDK_URL}" -o /tmp/swift-wasm-sdk.tar.gz; then
+            swift sdk install /tmp/swift-wasm-sdk.tar.gz || true
+          else
+            echo "WARN: no official wasm SDK published for ${SWIFT_TAG}; skipping wasm canary build."
+          fi
+          swift sdk list || true
+
+      - name: Build wasm — latest OpenCombine
+        id: build-wasm
+        run: |
+          SDK_ID=$(swift sdk list 2>/dev/null | grep -i wasm | head -1 | awk '{print $1}' || echo "")
+          if [ -z "$SDK_ID" ]; then
+            echo "WARN: No wasm SDK found; skipping wasm build in this canary run."
+            exit 0
+          fi
+          swift build --swift-sdk "${SDK_ID}" --target OpenCombineJS -c debug
 
       - name: File canary-failure issue (if not already open)
         if: failure()

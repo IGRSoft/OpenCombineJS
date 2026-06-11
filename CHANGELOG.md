@@ -1,3 +1,19 @@
+# Unreleased (0.6.0)
+
+**Build/packaging change — no public API is removed or deprecated:**
+
+- The OpenCombine product dependency is now **platform-conditional**
+  (`.when(platforms: [.wasi, .linux, .android, .windows, .openbsd])`): on Apple platforms —
+  where the sources already build against native Combine via `#if canImport(Combine)` (#11) —
+  OpenCombine is no longer compiled or linked at all, giving Apple consumers a
+  zero-OpenCombine build. All non-Apple platforms keep OpenCombine as a full build-and-link
+  dependency, so WASI/Linux consumers are unaffected. The package-level
+  `.package(url: …/OpenCombine.git …)` declaration remains, so SwiftPM still *fetches*
+  OpenCombine (and its transitive swift-syntax) at resolution time on every platform; only
+  the build/linkage footprint drops. The OpenCombine upstream canary now exercises the wasm
+  lane, since a host build no longer compiles OpenCombine
+  ([#15](https://github.com/IGRSoft/OpenCombineJS/issues/15))
+
 # 0.5.0 (2026-06-11)
 
 **Additions (strictly non-breaking — the public API is additive only):**

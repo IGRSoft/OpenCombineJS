@@ -17,6 +17,12 @@ APIs. Currently it provides:
 - A `publisher` property on [`JSPromise`](https://swiftwasm.github.io/JavaScriptKit/JSPromise/),
   which converts your [JavaScript `Promise`](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise) instances to Combine publishers.
 
+On Apple platforms the library builds against the **native Combine framework and links no
+OpenCombine at all** — the OpenCombine dependency is declared platform-conditionally, so Apple
+consumers get a zero-OpenCombine build (it is still fetched at dependency-resolution time). On
+WASI, Linux, and other platforms without Combine it builds against
+[OpenCombine](https://github.com/OpenCombine/OpenCombine).
+
 ## Example
 
 Here's an example of a timer that fetches a UUID from a remote server every second, parses it
