@@ -1,4 +1,4 @@
-# Unreleased (0.6.0)
+# 0.6.0 (2026-06-11)
 
 **Build/packaging change — no public API is removed or deprecated:**
 
