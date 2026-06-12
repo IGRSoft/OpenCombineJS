@@ -24,13 +24,13 @@ let package = Package(
   dependencies: [
     .package(
       url: "https://github.com/swiftwasm/JavaScriptKit.git",
-      from: "0.54.1"
+      from: "0.55.0"
     ),
     .package(url: "https://github.com/OpenCombine/OpenCombine.git", from: "0.14.0"),
-    .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.4.0"),
+    .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.5.0"),
   ],
   targets: [
-    .target(
+    .executableTarget(
       name: "OpenCombineJSExample",
       dependencies: [
         "OpenCombineJS",
